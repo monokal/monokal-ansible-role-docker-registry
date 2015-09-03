@@ -59,9 +59,20 @@
     name:         "{{ item }}"
     update_cache: yes
   with_items:
+    - "python-pip"    # Required for Docker module dependency (docker-py)
     - "apache2-utils" # Installs htpasswd tool
     - "lxc-docker"
   register: install_packages
+
+- name: install_pip_packages
+  when: install_packages|success
+  pip:
+    name:    "{{ item.name }}"
+    version: "{{ item.version }}"
+    state:   present
+  with_items:
+    - { name: 'docker-py', version: '1.2.3' } # Pinned due to https://github.com/ansible/ansible-modules-core/issues/1707
+  register: install_pip_packages
 
 # SSL certificates
 
@@ -77,7 +88,7 @@
 
 - name: generate_certs
   when: create_certs_dir|success
-  command: "sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout /opt/docker_registry/certs/registry.key -x509 -days 365 -out /opt/docker_registry/certs/registry.crt"
+  command: "sudo openssl req -x509 -subj '/C=GB/ST=South Yorkshire/L=Sheffield/O=Private Docker Registry/CN={{ ansible_fqdn }}' -nodes -sha256 -days 365 -newkey rsa:4096 -keyout /opt/docker_registry/certs/registry.key -out /opt/docker_registry/certs/registry.crt"
   args:
     creates: /opt/docker_registry/certs/registry.crt
   register: generate_certs
@@ -106,13 +117,12 @@
 # Docker containers
 
 - name: docker_start_registry
-  when: generate_auth|success
+  when: generate_auth|success and install_pip_packages|success
   docker:
     name:           registry
     image:          registry:2
     state:          started
     pull:           missing
-    detatch:        true
     restart_policy: always
     net:            bridge
     ports:
