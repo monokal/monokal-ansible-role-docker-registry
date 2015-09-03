@@ -1,0 +1,129 @@
+---
+
+# Documentation:
+# https://docs.docker.com/registry/deploying/
+# https://docs.docker.com/registry/insecure/
+
+# UFW
+
+- name: ufw_allow
+  ufw:
+    rule:      allow
+    port:      "{{ item.port }}"
+    proto:     "{{ item.proto }}"
+    direction: "{{ item.direction }}"
+  with_items:
+    - { port: '5000', proto: 'tcp', direction: 'in'} # Docker Registry
+  register: ufw_allow
+
+# APT keys
+
+## Until Ansible 2.0 the apt_key module is broken for the Docker repo. See:
+## https://github.com/ansible/ansible/issues/10091
+#- name: add_docker_apt_key
+#  apt_key:
+#    url:   "https://get.docker.com/gpg"
+#    state: present
+#  register: add_docker_apt_key
+
+- name: add_docker_apt_key
+  shell: "/usr/bin/curl https://get.docker.com/gpg | /usr/bin/apt-key add -"
+  args:
+    creates: /root/.ansible_add_docker_apt_key_lock
+  register: add_docker_apt_key
+
+- name: add_docker_apt_key_lock
+  when: add_docker_apt_key|success
+  copy:
+    content: ""
+    dest:    /root/.ansible_add_docker_apt_key_lock
+    owner:   root
+    group:   root
+    mode:    "u=rw,g=r,o=r"
+
+# APT repos
+
+- name: add_docker_apt_repo
+  when: add_docker_apt_key|success
+  apt_repository:
+    repo:         "deb https://get.docker.com/ubuntu docker main"
+    state:        present
+    update_cache: yes
+  register: add_docker_apt_repo
+
+# Packages
+
+- name: install_packages
+  when: add_docker_apt_repo|success
+  apt:
+    name:         "{{ item }}"
+    update_cache: yes
+  with_items:
+    - "apache2-utils" # Installs htpasswd tool
+    - "lxc-docker"
+  register: install_packages
+
+# SSL certificates
+
+- name: create_certs_dir
+  when: install_packages|success
+  file:
+    path:  /opt/docker_registry/certs
+    state: directory
+    owner: root
+    group: root
+    mode:  "u=rwx,g=rx,o=x"
+  register: create_certs_dir
+
+- name: generate_certs
+  when: create_certs_dir|success
+  command: "sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout /opt/docker_registry/certs/registry.key -x509 -days 365 -out /opt/docker_registry/certs/registry.crt"
+  args:
+    creates: /opt/docker_registry/certs/registry.crt
+  register: generate_certs
+  notify:
+    - restart_docker
+
+# Generate basic auth
+
+- name: create_auth_dir
+  when: install_packages|success
+  file:
+    path:  /opt/docker_registry/auth
+    state: directory
+    owner: root
+    group: root
+    mode:  "u=rwx,g=rx,o=x"
+  register: create_auth_dir
+
+- name: generate_auth
+  when: create_auth_dir|success
+  command: "htpasswd -bc /opt/docker_registry/auth/htpasswd testuser testpass"
+  args:
+    creates: /opt/docker_registry/auth/htpasswd
+  register: generate_auth
+
+# Docker containers
+
+- name: docker_start_registry
+  when: generate_auth|success
+  docker:
+    name:           registry
+    image:          registry:2
+    state:          started
+    pull:           missing
+    detatch:        true
+    restart_policy: always
+    net:            bridge
+    ports:
+        - "0.0.0.0:5000:5000"
+    volumes:
+        - "/opt/docker_registry/auth:/auth:ro"
+        - "/opt/docker_registry/certs:/certs:ro"
+        - "/opt/docker_registry/data:/var/lib/registry:rw"
+    env:
+        REGISTRY_AUTH_HTPASSWD_REALM:  Registry Realm
+        REGISTRY_AUTH_HTPASSWD_PATH:   /auth/htpasswd
+        REGISTRY_HTTP_TLS_CERTIFICATE: /certs/registry.crt
+        REGISTRY_HTTP_TLS_KEY:         /certs/registry.key
+  register: docker_start_registry
