@@ -38,6 +38,7 @@
   with_items:
     - "certs"
     - "auth"
+    - "data"
   register: create_directories
 
 # SSL certs
