@@ -4,29 +4,6 @@
 # https://docs.docker.com/registry/deploying/
 # https://docs.docker.com/registry/insecure/
 
-# Disable IPv6 as Docker likes to bind to it by default.
-
-- name: disable_all_ipv6
-  sysctl:
-    name:       "net.ipv6.conf.all.disable_ipv6"
-    value:      1
-    sysctl_set: yes
-    reload:     yes
-
-- name: disable_default_ipv6
-  sysctl:
-    name:       "net.ipv6.conf.default.disable_ipv6"
-    value:      1
-    sysctl_set: yes
-    reload:     yes
-
-- name: disable_lo_ipv6
-  sysctl:
-    name:       "net.ipv6.conf.lo.disable_ipv6"
-    value:      1
-    sysctl_set: yes
-    reload:     yes
-
 # UFW
 
 - name: ufw_allow
@@ -36,111 +13,55 @@
     proto:     "{{ item.proto }}"
     direction: "{{ item.direction }}"
   with_items:
-    - { port: '5000', proto: 'tcp', direction: 'in'} # Docker Registry
+    - { port: "{{ docker_registry_port }}", proto: 'tcp', direction: 'in'} # Docker Registry
   register: ufw_allow
-
-# APT keys
-
-## Until Ansible 2.0 the apt_key module is broken for the Docker repo. See:
-## https://github.com/ansible/ansible/issues/10091
-#- name: add_docker_apt_key
-#  apt_key:
-#    url:   "https://get.docker.com/gpg"
-#    state: present
-#  register: add_docker_apt_key
-
-- name: add_docker_apt_key
-  shell: "/usr/bin/curl https://get.docker.com/gpg | /usr/bin/apt-key add -"
-  args:
-    creates: /root/.ansible_add_docker_apt_key_lock
-  register: add_docker_apt_key
-
-- name: add_docker_apt_key_lock
-  when: add_docker_apt_key|success
-  copy:
-    content: ""
-    dest:    /root/.ansible_add_docker_apt_key_lock
-    owner:   root
-    group:   root
-    mode:    "u=rw,g=r,o=r"
-
-# APT repos
-
-- name: add_docker_apt_repo
-  when: add_docker_apt_key|success
-  apt_repository:
-    repo:         "deb https://get.docker.com/ubuntu docker main"
-    state:        present
-    update_cache: yes
-  register: add_docker_apt_repo
 
 # Packages
 
 - name: install_packages
-  when: add_docker_apt_repo|success
   apt:
     name:         "{{ item }}"
     update_cache: yes
   with_items:
-    - "python-pip"    # Required for Docker module dependency (docker-py)
-    - "apache2-utils" # Installs htpasswd tool
-    - "lxc-docker"
+    - "apache2-utils" # Required for htpasswd
   register: install_packages
 
-- name: install_pip_packages
-  when: install_packages|success
-  pip:
-    name:    "{{ item.name }}"
-    version: "{{ item.version }}"
-    state:   present
-  with_items:
-    - { name: 'docker-py', version: '1.2.3' } # Pinned due to https://github.com/ansible/ansible-modules-core/issues/1707
-  register: install_pip_packages
+# Directories
 
-# SSL certificates
-
-- name: create_certs_dir
-  when: install_packages|success
+- name: create_directories
   file:
-    path:  /opt/docker_registry/certs
+    path:  "/opt/docker_registry/{{ item }}"
     state: directory
     owner: root
     group: root
     mode:  "u=rwx,g=rx,o=x"
-  register: create_certs_dir
+  with_items:
+    - "certs"
+    - "auth"
+  register: create_directories
+
+# SSL certs
 
 - name: generate_certs
-  when: create_certs_dir|success
+  when: create_directories|success
   command: "sudo openssl req -x509 -subj '/C=GB/ST=South Yorkshire/L=Sheffield/O=Private Docker Registry/CN={{ ansible_fqdn }}' -nodes -sha256 -days 365 -newkey rsa:4096 -keyout /opt/docker_registry/certs/registry.key -out /opt/docker_registry/certs/registry.crt"
   args:
     creates: /opt/docker_registry/certs/registry.crt
   register: generate_certs
-  notify:
-    - restart_docker
 
-# Generate basic auth
+# Basic auth
 
-- name: create_auth_dir
-  when: install_packages|success
-  file:
-    path:  /opt/docker_registry/auth
-    state: directory
-    owner: root
-    group: root
-    mode:  "u=rwx,g=rx,o=x"
-  register: create_auth_dir
-
-- name: generate_auth
-  when: create_auth_dir|success
-  command: "htpasswd -bc /opt/docker_registry/auth/htpasswd testuser testpass"
+- name: generate_htpasswd
+  when: install_packages|success and create_directories|success
+  command: "htpasswd -bc /opt/docker_registry/auth/htpasswd {{ docker_registry_username }} {{ docker_registry_password }}"
   args:
     creates: /opt/docker_registry/auth/htpasswd
-  register: generate_auth
+  register: generate_htpasswd
 
-# Docker containers
+# Registry container
 
 - name: docker_start_registry
-  when: generate_auth|success and install_pip_packages|success
+  when: generate_certs|success and generate_htpasswd|success
   docker:
     name:           registry
     image:          registry:2
@@ -149,7 +70,7 @@
     restart_policy: always
     net:            bridge
     ports:
-        - "0.0.0.0:5000:5000"
+        - "0.0.0.0:{{ docker_registry_port }}:5000"
     volumes:
         - "/opt/docker_registry/auth:/auth:ro"
         - "/opt/docker_registry/certs:/certs:ro"
