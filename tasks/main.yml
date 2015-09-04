@@ -45,9 +45,9 @@
 
 - name: generate_certs
   when: create_directories|success
-  command: "sudo openssl req -x509 -subj '/C=GB/ST=South Yorkshire/L=Sheffield/O=Private Docker Registry/CN={{ ansible_fqdn }}' -nodes -sha256 -days 365 -newkey rsa:4096 -keyout /opt/docker_registry/certs/registry.key -out /opt/docker_registry/certs/registry.crt"
+  command: "sudo openssl req -x509 -subj '/C=GB/ST=South Yorkshire/L=Sheffield/O=Private Docker Registry/CN={{ ansible_fqdn }}' -nodes -sha256 -days 365 -newkey rsa:4096 -keyout /opt/docker_registry/certs/{{ ansible_fqdn }}.key -out /opt/docker_registry/certs/{{ ansible_fqdn }}.crt"
   args:
-    creates: /opt/docker_registry/certs/registry.crt
+    creates: "/opt/docker_registry/certs/{{ ansible_fqdn }}.crt"
   register: generate_certs
 
 # Basic auth
@@ -77,8 +77,8 @@
         - "/opt/docker_registry/certs:/certs:ro"
         - "{{ docker_registry_data_path }}:/var/lib/registry:rw"
     env:
-        REGISTRY_AUTH_HTPASSWD_REALM:  Registry Realm
-        REGISTRY_AUTH_HTPASSWD_PATH:   /auth/htpasswd
-        REGISTRY_HTTP_TLS_CERTIFICATE: /certs/registry.crt
-        REGISTRY_HTTP_TLS_KEY:         /certs/registry.key
+        REGISTRY_AUTH_HTPASSWD_REALM:  "Registry Realm"
+        REGISTRY_AUTH_HTPASSWD_PATH:   "/auth/htpasswd"
+        REGISTRY_HTTP_TLS_CERTIFICATE: "/certs/{{ ansible_fqdn }}.crt"
+        REGISTRY_HTTP_TLS_KEY:         "/certs/{{ ansible_fqdn }}.key"
   register: docker_start_registry
