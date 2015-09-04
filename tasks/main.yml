@@ -38,7 +38,7 @@
   with_items:
     - "certs"
     - "auth"
-    - "data"
+    - "data" # Created as local default but see "docker_registry_data_path" var.
   register: create_directories
 
 # SSL certs
@@ -75,7 +75,7 @@
     volumes:
         - "/opt/docker_registry/auth:/auth:ro"
         - "/opt/docker_registry/certs:/certs:ro"
-        - "/opt/docker_registry/data:/var/lib/registry:rw"
+        - "{{ docker_registry_data_path }}:/var/lib/registry:rw"
     env:
         REGISTRY_AUTH_HTPASSWD_REALM:  Registry Realm
         REGISTRY_AUTH_HTPASSWD_PATH:   /auth/htpasswd
