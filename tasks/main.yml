@@ -46,7 +46,6 @@
 
 - name: generate_certs
   when: create_directories|success
-  #command: "openssl req -newkey rsa:4096 -nodes -sha256 -subj '/C=GB/ST=South Yorkshire/L=Sheffield/O=Private Docker Registry/CN={{ ansible_fqdn }}' -keyout /opt/docker_registry/certs/{{ ansible_fqdn }}.key -x509 -days 365 -out /opt/docker_registry/certs/{{ ansible_fqdn }}.crt"
   command: "openssl req -newkey rsa:4096 -nodes -sha256 -subj '/C=GB/ST=South Yorkshire/L=Sheffield/O=Private Docker Registry/CN={{ ansible_fqdn }}' -keyout /opt/docker_registry/certs/domain.key -x509 -days 365 -out /opt/docker_registry/certs/domain.crt"
   args:
     creates: "/opt/docker_registry/certs/domain.crt"
