@@ -15,6 +15,9 @@
   with_items:
     # Inbound
     - { port: "{{ docker_registry_port }}", proto: 'tcp', direction: 'in'} # Docker Registry
+    # Outbound
+    - { port: "111",  proto: 'any', direction: 'out'} # NFS
+    - { port: "2049", proto: 'any', direction: 'out'} # NFS
   register: ufw_allow
 
 # Packages
@@ -25,6 +28,7 @@
     update_cache: yes
   with_items:
     - "apache2-utils" # Required for htpasswd
+    - "nfs-common"
   register: install_packages
 
 # Directories
